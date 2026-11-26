@@ -1,0 +1,82 @@
+name: Build O/L A+ Master 120Hz APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Unzip app.zip
+        run: |
+          ZIP_FILE=$(find . -maxdepth 3 -name "app.zip" | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: app.zip not found in repository!"
+            exit 1
+          fi
+          echo "Found $ZIP_FILE"
+          unzip -o "$ZIP_FILE" -d .
+
+      - name: Inject Version & Repo for Auto-Update
+        run: |
+          APP_VER="1.1.${{ github.run_number }}"
+          echo "APP_VER=$APP_VER" >> $GITHUB_ENV
+          REPO_SLUG="${{ github.repository }}"
+          REPO_SHORT="${REPO_SLUG##*/}"
+          echo "REPO_SHORT=$REPO_SHORT" >> $GITHUB_ENV
+          if [ -f "www/index.html" ]; then
+            sed -i "s|__APP_VERSION__|${APP_VER}|g" www/index.html
+            sed -i "s|__GITHUB_REPO__|${REPO_SLUG}|g" www/index.html
+          fi
+
+      - name: Install Dependencies & Setup Capacitor Android
+        run: |
+          npm install
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+          npm run enable-120hz
+
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Prepare APK Asset
+        run: |
+          APK_OUT="${REPO_SHORT}-v${APP_VER}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$APK_OUT"
+          echo "APK_OUT=$APK_OUT" >> $GITHUB_ENV
+
+      - name: Publish Release to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.APP_VER }}
+          name: ${{ env.REPO_SHORT }} v${{ env.APP_VER }} (120Hz APK)
+          body: |
+            🚀 **O/L A+ Master v${{ env.APP_VER }}** (120Hz + Sinhala Voice + 100% Offline, Ad-Free)
+            - Developed by **W. Vihanga Rasanjana Withanage**
+            - Download the `.apk` file below and install directly on Android.
+          files: ${{ env.APK_OUT }}
